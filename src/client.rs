@@ -63,23 +63,23 @@ impl ServerConnection {
 }
 
 /// Establish a TCP connection to an sccache server listening on `port`.
-pub fn connect_to_server(port: u16) -> io::Result<ServerConnection> {
-    trace!("connect_to_server({})", port);
-    let stream = TcpStream::connect(("127.0.0.1", port))?;
+pub fn connect_to_server(host: String, port: u16) -> io::Result<ServerConnection> {
+    trace!("connect_to_server({}, {})", host, port);
+    let stream = TcpStream::connect((host, port))?;
     ServerConnection::new(stream)
 }
 
 /// Attempt to establish a TCP connection to an sccache server listening on `port`.
 ///
 /// If the connection fails, retry a few times.
-pub fn connect_with_retry(port: u16) -> io::Result<ServerConnection> {
-    trace!("connect_with_retry({})", port);
+pub fn connect_with_retry(host: String, port: u16) -> io::Result<ServerConnection> {
+    trace!("connect_with_retry({}, {})", host, port);
     // TODOs:
     // * Pass the server Child in here, so we can stop retrying
     //   if the process exited.
     // * Send a pipe handle to the server process so it can notify
     //   us once it starts the server instead of us polling.
-    match retry(Fixed::from_millis(500).take(10), || connect_to_server(port)) {
+    match retry(Fixed::from_millis(500).take(10), || connect_to_server(host.clone(), port)) {
         Ok(conn) => Ok(conn),
         _ => Err(io::Error::new(
             io::ErrorKind::TimedOut,

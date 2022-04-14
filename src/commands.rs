@@ -42,6 +42,7 @@ use crate::errors::*;
 
 /// The default sccache server port.
 pub const DEFAULT_PORT: u16 = 4226;
+pub const DEFAULT_HOST: &str = "127.0.0.1";
 
 /// The number of milliseconds to wait for server startup.
 const SERVER_STARTUP_TIMEOUT: Duration = Duration::from_millis(10000);
@@ -52,6 +53,13 @@ fn get_port() -> u16 {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_PORT)
+}
+
+/// Get the host on which the server should listen.
+fn get_host() -> String {
+    env::var("SCCACHE_SERVER_HOST")
+        .ok()
+        .unwrap_or(String::from(DEFAULT_HOST))
 }
 
 /// Check if ignoring all response errors
@@ -265,11 +273,11 @@ fn run_server_process(startup_timeout: Option<Duration>) -> Result<ServerStartup
 
 /// Attempt to connect to an sccache server listening on `port`, or start one if no server is running.
 fn connect_or_start_server(
-    port: u16,
+    host: String, port: u16,
     startup_timeout: Option<Duration>,
 ) -> Result<ServerConnection> {
-    trace!("connect_or_start_server({})", port);
-    match connect_to_server(port) {
+    trace!("connect_or_start_server({}, {})", host, port);
+    match connect_to_server(host.clone(), port) {
         Ok(server) => Ok(server),
         Err(ref e)
             if e.kind() == io::ErrorKind::ConnectionRefused
@@ -294,7 +302,7 @@ fn connect_or_start_server(
                 ServerStartup::TimedOut => bail!("Timed out waiting for server startup"),
                 ServerStartup::Err { reason } => bail!("Server startup failed: {}", reason),
             }
-            let server = connect_with_retry(port)?;
+            let server = connect_with_retry(host, port)?;
             Ok(server)
         }
         Err(e) => Err(e.into()),
@@ -584,7 +592,7 @@ pub fn run_command(cmd: Command) -> Result<i32> {
     match cmd {
         Command::ShowStats(fmt) => {
             trace!("Command::ShowStats({:?})", fmt);
-            let srv = connect_or_start_server(get_port(), startup_timeout)?;
+            let srv = connect_or_start_server(get_host(), get_port(), startup_timeout)?;
             let stats = request_stats(srv).context("failed to get stats from server")?;
             match fmt {
                 StatsFormat::Text => stats.print(),
@@ -623,13 +631,13 @@ pub fn run_command(cmd: Command) -> Result<i32> {
         Command::StopServer => {
             trace!("Command::StopServer");
             println!("Stopping sccache server...");
-            let server = connect_to_server(get_port()).context("couldn't connect to server")?;
+            let server = connect_to_server(get_host(), get_port()).context("couldn't connect to server")?;
             let stats = request_shutdown(server)?;
             stats.print();
         }
         Command::ZeroStats => {
             trace!("Command::ZeroStats");
-            let conn = connect_or_start_server(get_port(), startup_timeout)?;
+            let conn = connect_or_start_server(get_host(),get_port(), startup_timeout)?;
             let stats = request_zero_stats(conn).context("couldn't zero stats on server")?;
             stats.print();
         }
@@ -691,7 +699,7 @@ pub fn run_command(cmd: Command) -> Result<i32> {
         ),
         Command::DistStatus => {
             trace!("Command::DistStatus");
-            let srv = connect_or_start_server(get_port(), startup_timeout)?;
+            let srv = connect_or_start_server(get_host(),get_port(), startup_timeout)?;
             let status =
                 request_dist_status(srv).context("failed to get dist-status from server")?;
             serde_json::to_writer(&mut io::stdout(), &status)?;
@@ -729,7 +737,7 @@ pub fn run_command(cmd: Command) -> Result<i32> {
         } => {
             trace!("Command::Compile {{ {:?}, {:?}, {:?} }}", exe, cmdline, cwd);
             let jobserver = unsafe { Client::new() };
-            let conn = connect_or_start_server(get_port(), startup_timeout)?;
+            let conn = connect_or_start_server(get_host(),get_port(), startup_timeout)?;
             let mut runtime = Runtime::new()?;
             let res = do_compile(
                 ProcessCommandCreator::new(&jobserver),
